@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Передача</title>
+    <style>
+        /* Основні стилі для сторінки */
+        body {
+            font-family: Arial, sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            margin: 0;
+            background-color: #f0f0f0;
+        }
+        button {
+            padding: 10px 20px;
+            font-size: 1.2em;
+            cursor: pointer;
+            background-color: #007bff;
+            color: #fff;
+            border: none;
+            border-radius: 5px;
+            transition: background-color 0.3s;
+            margin: 10px;
+        }
+        button:hover {
+            background-color: #0056b3;
+        }
+        #status {
+            margin-top: 20px;
+            font-size: 1em;
+        }
+        input[type="text"] {
+            font-size: 1em;
+            padding: 5px;
+            width: 200px;
+            margin: 10px;
+        }
+    </style>
+    <script>
+        let socket;
+        let audioContext;
+        let processor;
+        let stream;
+        let isTalking = false;
+
+        // Функція для налаштування аудіо
+        async function setupAudio() {
+            try {
+                // Запит на доступ до мікрофона
+                stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+
+                // Перевірка, якщо аудіоконтекст уже існує, пересоздавати його не потрібно
+                if (!audioContext) {
+                    audioContext = new (window.AudioContext || window.webkitAudioContext)({ latencyHint: 'interactive' });
+                }
+
+                const source = audioContext.createMediaStreamSource(stream);
+
+                // Налаштування аудіопроцесора
+                processor = audioContext.createScriptProcessor(2048, 1, 1);
+                source.connect(processor);
+                processor.connect(audioContext.destination);
+
+                processor.onaudioprocess = (event) => {
+                    if (isTalking && socket && socket.readyState === WebSocket.OPEN) {
+                        const inputData = event.inputBuffer.getChannelData(0);
+                        const buffer = new Int16Array(inputData.map(value => value * 32767)).buffer;
+                        socket.send(buffer);
+                    }
+                };
+
+                updateStatus('Мікрофон налаштовано і готовий до використання');
+            } catch (err) {
+                handleMicrophoneError(err);
+            }
+        }
+
+        // Функція для обробки помилок доступу до мікрофону
+        function handleMicrophoneError(err) {
+            console.error('Помилка доступу до мікрофону:', err);
+            let message = 'Помилка доступу до мікрофону.';
+            if (err.name === 'NotAllowedError') {
+                message = 'Доступ до мікрофону відхилено. Дозвольте доступ у налаштуваннях браузера.';
+            } else if (err.name === 'NotFoundError') {
+                message = 'Мікрофон не знайдено. Підключіть пристрій і спробуйте знову.';
+            }
+            updateStatus(message);
+        }
+
+        // Функція для підключення до WebSocket-сервера
+        function connectWebSocket() {
+            // Отримуємо координати з текстового поля
+            const coordinates = document.getElementById("coordinates").value;
+            // Підключення до WebSocket із передачею координат у URL
+            socket = new WebSocket(`ws://localhost:8765/${encodeURIComponent(coordinates)}`);
+            socket.binaryType = 'arraybuffer';
+
+            socket.onopen = () => {
+                console.log('З’єднання встановлено');
+                updateStatus('З’єднання встановлено');
+            };
+            socket.onclose = () => {
+                console.log('З’єднання закрито');
+                updateStatus('З’єднання закрито');
+                setTimeout(connectWebSocket, 5000); // Автоматичне перепідключення
+            };
+            socket.onerror = (error) => {
+                console.error('Помилка WebSocket:', error);
+                updateStatus('Помилка WebSocket');
+            };
+        }
+
+        // Функція для оновлення статусу
+        function updateStatus(message) {
+            document.getElementById('status').textContent = message;
+        }
+
+        // Функція для початку передачі голосу
+        function startTalking() {
+            if (socket && socket.readyState === WebSocket.OPEN) {
+                isTalking = true;
+                console.log('Говорю');
+                updateStatus('Говорю...');
+            }
+        }
+
+        // Функція для зупинки передачі голосу
+        function stopTalking() {
+            isTalking = false;
+            console.log('Закінчив говорити');
+            updateStatus('З’єднання встановлено');
+        }
+
+        // Налаштування після завантаження сторінки
+        window.onload = () => {
+            document.getElementById("connect").onclick = connectWebSocket;
+            setupAudio();
+        };
+    </script>
+</head>
+<body>
+    <h1></h1>
+    <!-- Поле для введення координат -->
+    <input type="text" id="coordinates" placeholder="Введіть координати">
+    <!-- Кнопка для підключення -->
+    <button id="connect">Підключитися</button>
+    <!-- Кнопки для керування голосом -->
+    <button onclick="startTalking()">Почати говорити</button>
+    <button onclick="stopTalking()">Припинити говорити</button>
+    <!-- Статус підключення -->
+    <div id="status">Підключення...</div>
+</body>
+</html>
